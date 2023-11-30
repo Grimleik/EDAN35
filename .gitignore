@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# Exluce VS Items
+x64/
+.vs/

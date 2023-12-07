@@ -1,6 +1,9 @@
 #ifndef _COMMON_H_
 #define _COMMON_H_
 
+#include <cassert>
+#include <stdint.h>
+
 inline int Wrap(int x, int xMax) {
     int result = (x + xMax) % xMax;
     return result;

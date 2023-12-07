@@ -1,37 +1,12 @@
+// WINDOWS INCLUDE
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
+#include "App.h"
 #include "Common.h"
 #include "Input.h"
-
-
-void ToggleFullscreen(HWND hwnd, WINDOWPLACEMENT &wpPrev) {
-    DWORD style = GetWindowLong(hwnd, GWL_STYLE);
-    if (style & WS_OVERLAPPEDWINDOW) {
-        MONITORINFO mi = {sizeof(mi)};
-        if (GetWindowPlacement(hwnd, &wpPrev) &&
-            GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
-            SetWindowLong(hwnd, GWL_STYLE,
-                          style & ~WS_OVERLAPPEDWINDOW);
-            SetWindowPos(hwnd, HWND_TOP,
-                         mi.rcMonitor.left, mi.rcMonitor.top,
-                         mi.rcMonitor.right - mi.rcMonitor.left,
-                         mi.rcMonitor.bottom - mi.rcMonitor.top,
-                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        }
-    } else {
-        SetWindowLong(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
-        SetWindowPlacement(hwnd, &wpPrev);
-        SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-    }
-}
 
 int64_t HiResPerformanceFreq() {
     LARGE_INTEGER countsPerSec;
@@ -55,11 +30,10 @@ int main(int argc, char **argv) {
 
     // NOTE(pf): Window setup.
     const wchar_t *appName = L"DX12";
-    int            screenW = 800; // 1280;
-    int            screenH = 800; // 720;
+    int            screenW = 1280;
+    int            screenH = 720;
 
     WNDCLASSEX wc = {0};
-    WINDOWPLACEMENT windowPlacementPrev = {sizeof(WINDOWPLACEMENT)};
     HINSTANCE  hinstance = GetModuleHandle(NULL);
 
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -87,6 +61,10 @@ int main(int argc, char **argv) {
                                windowStyles,
                                rect.left, rect.top, rect.right + 8, rect.bottom + 32,
                                NULL, NULL, hinstance, NULL);
+
+    App app(hwnd, screenW, screenH);
+    app.Init();
+
     ShowWindow(hwnd, SW_SHOW);
     SetForegroundWindow(hwnd);
     SetFocus(hwnd);
@@ -99,7 +77,6 @@ int main(int argc, char **argv) {
 
     Input input = {0};
     input.Instance = &input;
-
     while (isRunning) {
         int64_t startTime = HiResPerformanceQuery();
         MSG     msg;
@@ -108,14 +85,22 @@ int main(int argc, char **argv) {
             case WM_QUIT: {
                 isRunning = false;
             } break;
+            case WM_SIZE: {
+                RECT clientRect = {};
+                ::GetClientRect(hwnd, &clientRect);
 
+                int width = clientRect.right - clientRect.left;
+                int height = clientRect.bottom - clientRect.top;
+
+                app.Resize(width, height);
+            } break;
             case WM_SYSKEYDOWN:
             case WM_SYSKEYUP:
             case WM_KEYDOWN:
             case WM_KEYUP: {
                 unsigned int vkCode = (unsigned int)msg.wParam;
-                bool WasDown = ((msg.lParam & (1 << 30)) != 0);
-                bool isDown = ((msg.lParam & (1 << 31L)) == 0);
+                bool         WasDown = ((msg.lParam & (1 << 30)) != 0);
+                bool         isDown = ((msg.lParam & (1 << 31L)) == 0);
                 if (WasDown != isDown) {
                     Input::Instance->UpdateKey(vkCode, isDown);
                 }
@@ -133,17 +118,9 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (Input::Instance->KeyDown(KEY_ESCAPE)) {
-            isRunning = false;
-        }
-        
-        if (Input::Instance->KeyPressed(KEY_F) || 
-            (Input::Instance->KeyDown(KEY_ALT) && Input::Instance->KeyPressed(KEY_ENTER))) {
-            ToggleFullscreen(hwnd, windowPlacementPrev);
-        }
+        isRunning = app.Update(deltaTime, totalTime);
 
         Input::Instance->Update();
-        
         int64_t endTime = HiResPerformanceQuery();
         deltaTime = (float)Max(((endTime - startTime) / (double)HiResPerformanceFreq()), (int64_t)0);
         totalTime += deltaTime;
@@ -154,6 +131,7 @@ int main(int argc, char **argv) {
             prevTotalTime = totalTime;
         }
     }
+    app.CleanUp();
 
     return 0;
 }

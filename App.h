@@ -12,8 +12,6 @@ class App {
     bool Update(double dt, double totalTime);
     void CleanUp();
 
-    void Resize(uint32_t w, uint32_t h);
-
   private:
     DX12 dx12;
 

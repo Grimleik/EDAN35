@@ -4,8 +4,6 @@ struct VertexOut
 {
     float4 PosH : SV_POSITION;
     float3 NormalW : NORMAL;
-    float3 TangentW : TANGENT;
-    float2 TexC : TEXCOORD;
 };
 
 

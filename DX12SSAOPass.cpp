@@ -43,46 +43,8 @@ void DX12SSAOPass::Initialize(ID3D12Device *_device, ID3D12GraphicsCommandList2 
     DX12_HR(cbSSAOUploadBuffer->Map(0, nullptr, reinterpret_cast<void **>(&cbSSAOMapping)), L"");
 }
 
-UINT DX12SSAOPass::GetSSAOMapWidth() const {
-    return mRenderTargetWidth;
-}
-
-UINT DX12SSAOPass::GetSSAOMapHeight() const {
-    return mRenderTargetHeight;
-}
-
 void DX12SSAOPass::GetOffsetVectors(DirectX::XMFLOAT4 offsets[14]) {
     std::copy(&mOffsets[0], &mOffsets[14], &offsets[0]);
-}
-
-std::vector<float> DX12SSAOPass::CalcGaussWeights(float sigma) {
-    float twoSigma2 = 2.0f * sigma * sigma;
-
-    // Estimate the blur radius based on sigma since sigma controls the "width" of the bell curve.
-    // For example, for sigma = 3, the width of the bell curve is
-    int blurRadius = (int)ceil(2.0f * sigma);
-
-    assert(blurRadius <= maxBlurRadius);
-
-    std::vector<float> weights;
-    weights.resize(2 * blurRadius + 1);
-
-    float weightSum = 0.0f;
-
-    for (int i = -blurRadius; i <= blurRadius; ++i) {
-        float x = (float)i;
-
-        weights[i + blurRadius] = expf(-x * x / twoSigma2);
-
-        weightSum += weights[i + blurRadius];
-    }
-
-    // Divide by the sum so all the weights add up to 1.0.
-    for (int i = 0; i < weights.size(); ++i) {
-        weights[i] /= weightSum;
-    }
-
-    return weights;
 }
 
 ID3D12Resource *DX12SSAOPass::GetNormalMap() {
@@ -362,9 +324,6 @@ void DX12SSAOPass::BuildOffsetVectors() {
 
 void DX12SSAOPass::UploadConstants(XMMATRIX proj) {
     SsaoConstants ssaoCB;
-
-    XMMATRIX P = proj;
-
     // Transform NDC space [-1,+1]^2 to texture space [0,1]^2
     XMMATRIX T(
         0.5f, 0.0f, 0.0f, 0.0f,
@@ -372,19 +331,15 @@ void DX12SSAOPass::UploadConstants(XMMATRIX proj) {
         0.0f, 0.0f, 1.0f, 0.0f,
         0.5f, 0.5f, 0.0f, 1.0f);
 
-    ssaoCB.Proj = P;
-    auto tt = XMMatrixDeterminant(proj);
-    ssaoCB.InvProj = XMMatrixInverse(&tt, proj);
-    XMStoreFloat4x4(&ssaoCB.ProjTex, XMMatrixTranspose(P * T));
+    XMVECTOR projDet = XMMatrixDeterminant(proj);
+    XMMATRIX invProj = XMMatrixInverse(&projDet, proj);
+    XMStoreFloat4x4(&ssaoCB.Proj, XMMatrixTranspose(proj));
+    XMStoreFloat4x4(&ssaoCB.InvProj, XMMatrixTranspose(invProj));
+    XMStoreFloat4x4(&ssaoCB.ProjTex, XMMatrixTranspose(proj * T));
 
     GetOffsetVectors(ssaoCB.OffsetVectors);
 
-    auto blurWeights = CalcGaussWeights(2.5f);
-    ssaoCB.BlurWeights[0] = XMFLOAT4(&blurWeights[0]);
-    ssaoCB.BlurWeights[1] = XMFLOAT4(&blurWeights[4]);
-    ssaoCB.BlurWeights[2] = XMFLOAT4(&blurWeights[8]);
-
-    ssaoCB.InvRenderTargetSize = XMFLOAT2(1.0f / GetSSAOMapWidth(), 1.0f / GetSSAOMapHeight());
+    ssaoCB.InvRenderTargetSize = XMFLOAT2(1.0f / mRenderTargetWidth, 1.0f / mRenderTargetHeight);
 
     // Coordinates given in view space.
     ssaoCB.OcclusionRadius = 0.5f;

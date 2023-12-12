@@ -1,4 +1,4 @@
-// WINDOWS INCLUDE
+
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <stdint.h>
@@ -30,8 +30,8 @@ int main(int argc, char **argv) {
 
     // NOTE(pf): Window setup.
     const wchar_t *appName = L"DX12";
-    int            screenW = 800;
-    int            screenH = 600;
+    int            screenW = 1200;
+    int            screenH = 720;
 
     WNDCLASSEX wc = {0};
     HINSTANCE  hinstance = GetModuleHandle(NULL);
@@ -62,12 +62,12 @@ int main(int argc, char **argv) {
                                rect.left, rect.top, rect.right + 8, rect.bottom + 32,
                                NULL, NULL, hinstance, NULL);
 
-    App app(hwnd, screenW, screenH);
-    app.Init();
-
     ShowWindow(hwnd, SW_SHOW);
     SetForegroundWindow(hwnd);
     SetFocus(hwnd);
+
+    App app(hwnd, screenW, screenH);
+    app.Init();
 
     // NOTE(pf): State setup:
     double totalTime = 0.0f;
@@ -84,15 +84,6 @@ int main(int argc, char **argv) {
             switch (msg.message) {
             case WM_QUIT: {
                 isRunning = false;
-            } break;
-            case WM_SIZE: {
-                RECT clientRect = {};
-                ::GetClientRect(hwnd, &clientRect);
-
-                int width = clientRect.right - clientRect.left;
-                int height = clientRect.bottom - clientRect.top;
-
-                app.Resize(width, height);
             } break;
             case WM_SYSKEYDOWN:
             case WM_SYSKEYUP:

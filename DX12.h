@@ -25,7 +25,6 @@ struct DX12 {
     ~DX12();
 
     void Initialize();
-    void Resize(uint32_t w, uint32_t h);
     void UpdateAndRender(DirectX::XMMATRIX modelMatrix,
                          DirectX::XMMATRIX viewMatrix,
                          DirectX::XMMATRIX projectionMatrix);
@@ -36,13 +35,10 @@ struct DX12 {
     void ClearRTV(ID3D12GraphicsCommandList2 *commandList,
                   D3D12_CPU_DESCRIPTOR_HANDLE rtv, FLOAT *clearColor);
     void ClearDepth(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE dsv, float depth = 1.0f);
-    void ResizeDepthBuffer(uint32_t w, uint32_t h);
     void UpdateBufferResource(ID3D12GraphicsCommandList2 *commandList, ID3D12Resource **dest, ID3D12Resource **intermediare,
                               size_t numElements, size_t elementSize, const void *bufferData, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
 
     void LoadContent();
-
-    void ToggleFullscreen();
 
     const HWND              &hwnd;
     RECT                     windowRect;
@@ -54,8 +50,6 @@ struct DX12 {
     unsigned int             rtvDescriptorSize = {0};
     unsigned int             currentBackBufferIndex = {0};
     uint64_t                 frameFenceValues[NUM_FRAMES] = {};
-    bool                     vSync = {true};
-    bool                     tearingSupported = {false};
     bool                     fullscreen = {false};
     ID3D12DescriptorHeap    *dsvHeap = {nullptr};
     ID3D12Resource          *vertexBuffer = {nullptr};
@@ -69,7 +63,6 @@ struct DX12 {
     ID3D12RootSignature     *ssaoRootSignature = {nullptr};
 
   private:
-    void                  UpdateRenderTargetViews();
     void                  Flush();
     WINDOWPLACEMENT       wpPrev = {sizeof(WINDOWPLACEMENT)};
     DX12CommandQueue     *directCQ;
@@ -85,9 +78,8 @@ struct DX12 {
     void                  CreateShadersAndPSOs();
     ID3D12Resource       *cbConstantUploadBuffer;
     BYTE                 *cbDataMapping = nullptr;
-    void                  UpdateNormalConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX viewProj);
-    void                  UpdateSSAOConstants(DirectX::XMMATRIX proj);
-    void                  DrawRenderMesh(ID3D12GraphicsCommandList2 *commandList, DX12RenderMesh rm, ID3D12Resource *mapping);
+    void                  UploadConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX viewProj);
+    void                  DrawRenderMesh(ID3D12GraphicsCommandList2 *commandList, DX12RenderMesh rm);
     UINT                  mRtvDescriptorSize = 0;
     UINT                  mDsvDescriptorSize = 0;
     UINT                  mCbvSrvUavDescriptorSize = 0;

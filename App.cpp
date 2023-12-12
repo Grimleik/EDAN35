@@ -21,12 +21,6 @@ void App::Init() {
 bool App::Update(double dt, double totalTime) {
 
     // INPUT:
-    if (Input::Instance->KeyPressed(KEY_F)) {
-        // TODO:
-        assert(false && "Not yet implemented.");
-        //dx12.ToggleFullscreen();
-    }
-
     if (Input::Instance->KeyDown(KEY_ESCAPE)) {
         return false;
     }
@@ -54,10 +48,4 @@ bool App::Update(double dt, double totalTime) {
 
 void App::CleanUp() {
     dx12.CleanUp();
-}
-
-void App::Resize(uint32_t w, uint32_t h) {
-    // TODO:
-    assert(false && "Not yet implemented.");
-    //dx12.Resize(w, h);
 }

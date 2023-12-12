@@ -5,13 +5,10 @@
 #include "DX12CommandQueue.h"
 
 struct SsaoConstants {
-    DirectX::XMMATRIX   Proj;
-    DirectX::XMMATRIX   InvProj;
+    DirectX::XMFLOAT4X4 Proj;
+    DirectX::XMFLOAT4X4 InvProj;
     DirectX::XMFLOAT4X4 ProjTex;
     DirectX::XMFLOAT4   OffsetVectors[14];
-
-    // For SsaoBlur.hlsl
-    DirectX::XMFLOAT4 BlurWeights[3];
 
     DirectX::XMFLOAT2 InvRenderTargetSize = {0.0f, 0.0f};
 
@@ -33,10 +30,7 @@ struct DX12SSAOPass {
     static const DXGI_FORMAT normalMapFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
     static const int         maxBlurRadius = 5;
 
-    UINT                          GetSSAOMapWidth() const;
-    UINT                          GetSSAOMapHeight() const;
     void                          GetOffsetVectors(DirectX::XMFLOAT4 offsets[14]);
-    std::vector<float>            CalcGaussWeights(float sigma);
     ID3D12Resource               *GetNormalMap();
     ID3D12Resource               *GetAmbientMap();
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetNormalMapRTV() const;

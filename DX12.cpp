@@ -25,7 +25,6 @@ void ReportLiveObjects() {
     DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug));
 
     dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_IGNORE_INTERNAL);
-    // dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_IGNORE_INTERNAL);
     DX12_RELEASE(dxgiDebug);
 }
 
@@ -34,34 +33,25 @@ void DX12::Initialize() {
     // NOTE(pf): Check if we should enable the debug layer..
 
 #if defined(_DEBUG)
+
     ID3D12Debug *debugInterface;
     DX12_HR(D3D12GetDebugInterface(IID_PPV_ARGS(&debugInterface)), L"Unable to retrieve debug interface.");
     debugInterface->EnableDebugLayer();
     DX12_RELEASE(debugInterface);
     atexit(&ReportLiveObjects);
-#endif
 
-    // .. check for tearing support..
-    BOOL           allowTearing = FALSE;
-    IDXGIFactory4 *factory4;
-    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory4)))) {
-        IDXGIFactory5 *factory5;
-        if (SUCCEEDED(factory4->QueryInterface(__uuidof(IDXGIFactory5), (LPVOID *)&factory5))) {
-            if (FAILED(factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing)))) {
-                allowTearing = false;
-            }
-            DX12_RELEASE(factory5);
-        }
-    }
-    DX12_RELEASE(factory4);
-    tearingSupported = allowTearing;
+#endif
 
     // .. try to find a suitable adapter on the computer..
     IDXGIFactory6 *dxgiFactory;
     UINT           createFactoryFlags = 0;
+
 #if defined(_DEBUG)
+
     createFactoryFlags = DXGI_CREATE_FACTORY_DEBUG;
+
 #endif
+
     DX12_HR(CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&dxgiFactory)), L"Unable to create a DXGIFactory");
 
     IDXGIAdapter1 *adapter = nullptr;
@@ -86,7 +76,6 @@ void DX12::Initialize() {
         }
     }
 
-    DX12_RELEASE(dxgiFactory);
     if (maxDedictedVideoMemory == 0) {
         MessageBox(0, L"Failed to find a suitable GFX Card.", L"Error", MB_OK);
         return;
@@ -130,18 +119,11 @@ void DX12::Initialize() {
         DX12_RELEASE(pInfoQueue);
     }
 #endif
+
     directCQ = new DX12CommandQueue(device, D3D12_COMMAND_LIST_TYPE_DIRECT);
     auto commandList = directCQ->GetCommandList();
 
     //  .. create the swap chain ..
-    IDXGIFactory5 *dxgiFactory4;
-    createFactoryFlags = 0;
-#if defined(_DEBUG)
-    createFactoryFlags = DXGI_CREATE_FACTORY_DEBUG;
-#endif
-
-    DX12_HR(CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&dxgiFactory4)), L"Failed to create a Factory.");
-
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.Width = windowWidth;
     swapChainDesc.Height = windowHeight;
@@ -153,21 +135,21 @@ void DX12::Initialize() {
     swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
-    swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    swapChainDesc.Flags = 0;
 
     IDXGISwapChain1 *tmpSwapChain;
-    DX12_HR(dxgiFactory4->CreateSwapChainForHwnd(directCQ->GetCommandQueue(), hwnd, &swapChainDesc, nullptr, nullptr, &tmpSwapChain), L"Failed to create the swapchain.");
-    DX12_HR(dxgiFactory4->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER), L"Failed to disable alt+enter fullscreen.");
+    DX12_HR(dxgiFactory->CreateSwapChainForHwnd(directCQ->GetCommandQueue(), hwnd, &swapChainDesc, nullptr, nullptr, &tmpSwapChain), L"Failed to create the swapchain.");
+    DX12_HR(dxgiFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER), L"Failed to disable alt+enter fullscreen.");
     DX12_HR(tmpSwapChain->QueryInterface(__uuidof(IDXGISwapChain4), (LPVOID *)&swapChain), L"Failed to init swapchain.");
 
-    DX12_RELEASE(dxgiFactory4);
+    DX12_RELEASE(dxgiFactory);
     DX12_RELEASE(tmpSwapChain);
 
     currentBackBufferIndex = swapChain->GetCurrentBackBufferIndex();
 
     // .. create the descriptor heap ..
     D3D12_DESCRIPTOR_HEAP_DESC rtv_desc = {};
-    rtv_desc.NumDescriptors = NUM_FRAMES + 2; // Normal and SSAO map.
+    rtv_desc.NumDescriptors = NUM_FRAMES + 2; // Backbuffers, Normal and SSAO map.
     rtv_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtv_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     rtv_desc.NodeMask = 0;
@@ -176,9 +158,17 @@ void DX12::Initialize() {
     rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
     // .. setup our render target views ..
-    UpdateRenderTargetViews();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    for (int i = 0; i < NUM_FRAMES; ++i) {
+        ID3D12Resource *backBuffer;
+        DX12_HR(swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer)), L"Failed to retrieve backbuffer from swap chain.");
 
-    // .. our depthstencilview ..
+        device->CreateRenderTargetView(backBuffer, nullptr, rtvHandle);
+        backBuffers[i] = backBuffer;
+        rtvHandle.Offset(rtvDescriptorSize);
+    }
+
+    // .. our dsv and depthbuffer ..
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
     dsvHeapDesc.NumDescriptors = 1;
     dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
@@ -206,8 +196,9 @@ void DX12::Initialize() {
 
     device->CreateDepthStencilView(depthBuffer, &dsv, dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
+    // .. create a mapping to our constant buffer on the gpu ..
     heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    auto init_state = CD3DX12_RESOURCE_DESC::Buffer((sizeof(CBConstants) + 255) & ~255);
+    auto init_state = CD3DX12_RESOURCE_DESC::Buffer(sizeof(CBConstants));
     DX12_HR(device->CreateCommittedResource(
                 &heap_prop,
                 D3D12_HEAP_FLAG_NONE,
@@ -233,7 +224,7 @@ void DX12::UpdateAndRender(DirectX::XMMATRIX modelMatrix, DirectX::XMMATRIX view
     auto                        commandQueue = directCQ;
     ID3D12GraphicsCommandList2 *commandList = commandQueue->GetCommandList();
 
-    UpdateNormalConstantBuffer(modelMatrix, viewMatrix, projectionMatrix);
+    UploadConstantBuffer(modelMatrix, viewMatrix, projectionMatrix);
     ssaoPass.UploadConstants(projectionMatrix);
 
     // RENDER:
@@ -259,7 +250,7 @@ void DX12::UpdateAndRender(DirectX::XMMATRIX modelMatrix, DirectX::XMMATRIX view
 
     commandList->OMSetRenderTargets(1, &normalMapRtv, true, &dsv);
     commandList->SetPipelineState(normalPSO);
-    DrawRenderMesh(commandList, renderSkull, cbConstantUploadBuffer);
+    DrawRenderMesh(commandList, renderSkull);
 
     TransitionResource(commandList, normalMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ);
 
@@ -293,10 +284,8 @@ void DX12::UpdateAndRender(DirectX::XMMATRIX modelMatrix, DirectX::XMMATRIX view
     TransitionResource(commandList, backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
     frameFenceValues[currentBackBufferIndex] = commandQueue->ExecuteCommandList(commandList);
-    UINT syncInterval = vSync ? 1 : 0;
-    UINT presentFlags = tearingSupported && !vSync ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
-    DX12_HR(swapChain->Present(syncInterval, presentFlags), L"Failed to swap back buffers.");
+    DX12_HR(swapChain->Present(0, 0), L"Failed to swap back buffers.");
     currentBackBufferIndex = swapChain->GetCurrentBackBufferIndex();
     commandQueue->WaitForFenceValue(frameFenceValues[currentBackBufferIndex]);
 }
@@ -333,9 +322,6 @@ void DX12::ClearRTV(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTO
 
 void DX12::ClearDepth(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE dsv, float depth) {
     commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, depth, 0, 0, nullptr);
-}
-
-void DX12::ResizeDepthBuffer(uint32_t w, uint32_t h) {
 }
 
 ID3D12Resource *CreateDefaultBuffer(
@@ -547,7 +533,7 @@ void DX12::LoadContent() {
     DX12_RELEASE(errorBlob);
 }
 
-void DX12::UpdateNormalConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX proj) {
+void DX12::UploadConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX proj) {
     XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 
     CBConstants constantCB = {};
@@ -557,11 +543,7 @@ void DX12::UpdateNormalConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX
     memcpy(cbDataMapping, &constantCB, sizeof(constantCB));
 }
 
-void DX12::UpdateSSAOConstants(DirectX::XMMATRIX proj) {
-    
-}
-
-void DX12::DrawRenderMesh(ID3D12GraphicsCommandList2 *cmdList, DX12RenderMesh rm, ID3D12Resource *mapping) {
+void DX12::DrawRenderMesh(ID3D12GraphicsCommandList2 *cmdList, DX12RenderMesh rm) {
 
     auto vbv = rm.VertexBufferView();
     cmdList->IASetVertexBuffers(0, 1, &vbv);
@@ -569,72 +551,7 @@ void DX12::DrawRenderMesh(ID3D12GraphicsCommandList2 *cmdList, DX12RenderMesh rm
     cmdList->IASetIndexBuffer(&ibv);
     cmdList->IASetPrimitiveTopology(rm.primitiveType);
 
-    if (mapping) {
-        D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = mapping->GetGPUVirtualAddress();
-        cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
-    }
-
     cmdList->DrawIndexedInstanced(rm.indexCount, 1, rm.startIndexLoc, rm.baseVertexLoc, 0);
-}
-
-void DX12::ToggleFullscreen() {
-    DWORD style = GetWindowLong(hwnd, GWL_STYLE);
-
-    if (style & WS_OVERLAPPEDWINDOW) {
-        MONITORINFO mi = {sizeof(mi)};
-        if (GetWindowPlacement(hwnd, &wpPrev) &&
-            GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
-            SetWindowLong(hwnd, GWL_STYLE,
-                          style & ~WS_OVERLAPPEDWINDOW);
-            SetWindowPos(hwnd, HWND_TOP,
-                         mi.rcMonitor.left, mi.rcMonitor.top,
-                         mi.rcMonitor.right - mi.rcMonitor.left,
-                         mi.rcMonitor.bottom - mi.rcMonitor.top,
-                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        }
-    } else {
-        SetWindowLong(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
-        SetWindowPlacement(hwnd, &wpPrev);
-        SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-    }
-}
-
-void DX12::Resize(uint32_t width, uint32_t height) {
-    if (windowWidth != width || windowHeight != height) {
-        windowWidth = max(0, width);
-        windowHeight = max(0, height);
-
-        Flush();
-
-        for (int i = 0; i < NUM_FRAMES; ++i) {
-            backBuffers[i]->Release();
-            frameFenceValues[i] = frameFenceValues[currentBackBufferIndex];
-        }
-
-        DXGI_SWAP_CHAIN_DESC sc_desc = {};
-        DX12_HR(swapChain->GetDesc(&sc_desc), L"Failed to setup swapchain in Resize.");
-        DX12_HR(swapChain->ResizeBuffers(NUM_FRAMES, windowWidth, windowHeight, sc_desc.BufferDesc.Format, sc_desc.Flags), L"Failed to resize swapchain buffers.");
-        currentBackBufferIndex = swapChain->GetCurrentBackBufferIndex();
-
-        UpdateRenderTargetViews();
-
-        viewPort = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)width, (float)height);
-        ResizeDepthBuffer(width, height);
-    }
-}
-
-void DX12::UpdateRenderTargetViews() {
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-    for (int i = 0; i < NUM_FRAMES; ++i) {
-        ID3D12Resource *backBuffer;
-        DX12_HR(swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer)), L"Failed to retrieve backbuffer from swap chain.");
-
-        device->CreateRenderTargetView(backBuffer, nullptr, rtvHandle);
-        backBuffers[i] = backBuffer;
-        rtvHandle.Offset(rtvDescriptorSize);
-    }
 }
 
 void DX12::Flush() {
@@ -664,15 +581,22 @@ void DX12::CreateSSAORootSignature() {
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
 
-    const CD3DX12_STATIC_SAMPLER_DESC linearClamp(
-        1,                                 // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,   // filter
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
+    CD3DX12_STATIC_SAMPLER_DESC       depthMapSampler = {};
+    depthMapSampler.ShaderRegister = 1;
+    depthMapSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    depthMapSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.MipLODBias = 0,
+    depthMapSampler.MaxAnisotropy = 0,
+    depthMapSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    depthMapSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    depthMapSampler.MinLOD = 0;
+    depthMapSampler.MaxLOD = D3D12_FLOAT32_MAX;
+    depthMapSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     const CD3DX12_STATIC_SAMPLER_DESC depthMapSam(
-        2,                                 // shaderRegister
+        1,                                 // shaderRegister
         D3D12_FILTER_MIN_MAG_MIP_LINEAR,   // filter
         D3D12_TEXTURE_ADDRESS_MODE_BORDER, // addressU
         D3D12_TEXTURE_ADDRESS_MODE_BORDER, // addressV
@@ -683,18 +607,18 @@ void DX12::CreateSSAORootSignature() {
         D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE);
 
     const CD3DX12_STATIC_SAMPLER_DESC linearWrap(
-        3,                                // shaderRegister
+        2,                                // shaderRegister
         D3D12_FILTER_MIN_MAG_MIP_LINEAR,  // filter
         D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
         D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
         D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
 
-    std::array<CD3DX12_STATIC_SAMPLER_DESC, 4> staticSamplers =
+    std::array<CD3DX12_STATIC_SAMPLER_DESC, 3> staticSamplers =
         {
-            pointClamp, linearClamp, depthMapSam, linearWrap};
+            pointClamp, depthMapSam, linearWrap};
 
     // A root signature is an array of root parameters.
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotRootParameter,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(_countof(slotRootParameter), slotRootParameter,
                                             (UINT)staticSamplers.size(), staticSamplers.data(),
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 

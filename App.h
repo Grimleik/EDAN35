@@ -2,7 +2,6 @@
 #define _APP_H_
 
 #include "DX12.h"
-#include <DirectXMath.h>
 
 class App {
   public:
@@ -23,8 +22,8 @@ class App {
     DirectX::XMMATRIX projectionMatrix;
 
     float fov = {45.0f};
-    float nearPlane = {0.1f};
-    float farPlane = {100.0f};
+    float nearPlane = {1.0f};
+    float farPlane = {1000.0f};
 };
 
 #endif //!_APP_H_

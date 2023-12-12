@@ -30,8 +30,8 @@ int main(int argc, char **argv) {
 
     // NOTE(pf): Window setup.
     const wchar_t *appName = L"DX12";
-    int            screenW = 1280;
-    int            screenH = 720;
+    int            screenW = 800;
+    int            screenH = 600;
 
     WNDCLASSEX wc = {0};
     HINSTANCE  hinstance = GetModuleHandle(NULL);

@@ -30,6 +30,9 @@
     <ClCompile Include="App.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DX12SSAOPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Input.h">
@@ -50,12 +53,24 @@
     <ClInclude Include="Common_DX12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DX12RenderMesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DX12SSAOPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CopyFileToFolders Include="externals\d3dcompiler\d3dcompiler_47.dll" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\VertexShader.hlsl" />
-    <FxCompile Include="shaders\PixelShader.hlsl" />
+    <FxCompile Include="shaders\NormalsPS.hlsl" />
+    <FxCompile Include="shaders\NormalsVS.hlsl" />
+    <FxCompile Include="shaders\SSAOPS.hlsl" />
+    <FxCompile Include="shaders\SSAOVS.hlsl" />
+    <FxCompile Include="shaders\Common.hlsl" />
+    <FxCompile Include="shaders\CommonSSAO.hlsl" />
+    <FxCompile Include="shaders\DrawSSAOPS.hlsl" />
+    <FxCompile Include="shaders\DrawSSAOVS.hlsl" />
   </ItemGroup>
 </Project>

@@ -58,7 +58,7 @@ void DX12CommandQueue::Flush() {
     WaitForFenceValue(Signal());
 }
 
-ID3D12GraphicsCommandList2 *DX12CommandQueue::GetCommandList() {
+ID3D12GraphicsCommandList2 *DX12CommandQueue::GetCommandList(ID3D12PipelineState *init_state) {
 
     ID3D12CommandAllocator     *commandAllocator;
     ID3D12GraphicsCommandList2 *result;
@@ -75,7 +75,7 @@ ID3D12GraphicsCommandList2 *DX12CommandQueue::GetCommandList() {
         result = commandListQueue.front();
         commandListQueue.pop();
 
-        DX12_HR(result->Reset(commandAllocator, nullptr), L"Failed to reset command list.");
+        DX12_HR(result->Reset(commandAllocator, init_state), L"Failed to reset command list.");
     } else {
         result = CreateCommandList(commandAllocator);
     }

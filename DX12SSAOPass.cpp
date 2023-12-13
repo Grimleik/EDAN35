@@ -51,21 +51,10 @@ ID3D12Resource *DX12SSAOPass::GetNormalMap() {
     return mNormalMap;
 }
 
-ID3D12Resource *DX12SSAOPass::GetAmbientMap() {
-    return mAmbientMap0;
-}
-
 CD3DX12_CPU_DESCRIPTOR_HANDLE DX12SSAOPass::GetNormalMapRTV() const {
     return mhNormalMapCpuRtv;
 }
 
-CD3DX12_GPU_DESCRIPTOR_HANDLE DX12SSAOPass::GetNormalMapSRV() const {
-    return mhNormalMapGpuSrv;
-}
-
-CD3DX12_GPU_DESCRIPTOR_HANDLE DX12SSAOPass::GetAmbientMapSRV() const {
-    return mhAmbientMap0GpuSrv;
-}
 
 void DX12SSAOPass::BuildDescriptors(ID3D12Resource *depthStencilBuffer, CD3DX12_CPU_DESCRIPTOR_HANDLE hCpuSrv, CD3DX12_GPU_DESCRIPTOR_HANDLE hGpuSrv, CD3DX12_CPU_DESCRIPTOR_HANDLE hCpuRtv, UINT cbvSrvUavDescriptorSize, UINT rtvDescriptorSize) {
     // Save references to the descriptors.  The Ssao reserves heap space
@@ -142,13 +131,12 @@ void DX12SSAOPass::ComputeSsao(ID3D12GraphicsCommandList *cmdList) {
     // Bind the constant buffer for this pass.
     auto ssaoCBAddress = cbSSAOUploadBuffer->GetGPUVirtualAddress();
     cmdList->SetGraphicsRootConstantBufferView(0, ssaoCBAddress);
-    cmdList->SetGraphicsRoot32BitConstant(1, 0, 0);
 
     // Bind the normal and depth maps.
-    cmdList->SetGraphicsRootDescriptorTable(2, mhNormalMapGpuSrv);
+    cmdList->SetGraphicsRootDescriptorTable(1, mhNormalMapGpuSrv);
 
     // Bind the random vector map.
-    cmdList->SetGraphicsRootDescriptorTable(3, mhRandomVectorMapGpuSrv);
+    cmdList->SetGraphicsRootDescriptorTable(2, mhRandomVectorMapGpuSrv);
 
     cmdList->SetPipelineState(mSsaoPso);
 

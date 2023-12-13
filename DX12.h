@@ -25,6 +25,9 @@ struct DX12 {
     ~DX12();
 
     void Initialize();
+    void CreateShadersAndPSOs();
+    void UploadConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX viewProj);
+    void DrawRenderMesh(ID3D12GraphicsCommandList2 *commandList, DX12RenderMesh rm);
     void UpdateAndRender(DirectX::XMMATRIX modelMatrix,
                          DirectX::XMMATRIX viewMatrix,
                          DirectX::XMMATRIX projectionMatrix);
@@ -35,36 +38,27 @@ struct DX12 {
     void ClearRTV(ID3D12GraphicsCommandList2 *commandList,
                   D3D12_CPU_DESCRIPTOR_HANDLE rtv, FLOAT *clearColor);
     void ClearDepth(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE dsv, float depth = 1.0f);
-    void UpdateBufferResource(ID3D12GraphicsCommandList2 *commandList, ID3D12Resource **dest, ID3D12Resource **intermediare,
-                              size_t numElements, size_t elementSize, const void *bufferData, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
-
     void LoadContent();
+    void Flush();
 
-    const HWND              &hwnd;
-    RECT                     windowRect;
-    uint32_t                 windowWidth, windowHeight;
-    ID3D12Device5           *device = {nullptr};
-    IDXGISwapChain4         *swapChain = {nullptr};
-    ID3D12DescriptorHeap    *rtvDescriptorHeap = {nullptr};
-    ID3D12Resource          *backBuffers[NUM_FRAMES];
-    unsigned int             rtvDescriptorSize = {0};
-    unsigned int             currentBackBufferIndex = {0};
-    uint64_t                 frameFenceValues[NUM_FRAMES] = {};
-    bool                     fullscreen = {false};
-    ID3D12DescriptorHeap    *dsvHeap = {nullptr};
-    ID3D12Resource          *vertexBuffer = {nullptr};
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
-    ID3D12Resource          *indexBuffer = {nullptr};
-    D3D12_INDEX_BUFFER_VIEW  indexBufferView;
-    ID3D12Resource          *depthBuffer = {nullptr};
-    ID3D12RootSignature     *rootSignature = {nullptr};
-    D3D12_VIEWPORT           viewPort;
-    D3D12_RECT               scissorRect;
-    ID3D12RootSignature     *ssaoRootSignature = {nullptr};
+    ID3D12Resource *CreateDefaultBuffer(ID3D12Device *device, ID3D12GraphicsCommandList *cmdList, const void *initData, UINT64 byteSize, ID3D12Resource **uploadBuffer);
 
-  private:
-    void                  Flush();
-    WINDOWPLACEMENT       wpPrev = {sizeof(WINDOWPLACEMENT)};
+    const HWND           &hwnd;
+    uint32_t              windowWidth, windowHeight;
+    ID3D12Device5        *device = {nullptr};
+    IDXGISwapChain4      *swapChain = {nullptr};
+    ID3D12DescriptorHeap *rtvDescriptorHeap = {nullptr};
+    ID3D12Resource       *backBuffers[NUM_FRAMES];
+    unsigned int          rtvDescriptorSize = {0};
+    unsigned int          cbvSrvUavDescriptorSize = 0;
+    unsigned int          currentBackBufferIndex = {0};
+    uint64_t              frameFenceValues[NUM_FRAMES] = {};
+    ID3D12DescriptorHeap *dsvHeap = {nullptr};
+    ID3D12Resource       *depthBuffer = {nullptr};
+    ID3D12RootSignature  *rootSignature = {nullptr};
+    D3D12_VIEWPORT        viewPort;
+    D3D12_RECT            scissorRect;
+    ID3D12RootSignature  *ssaoRootSignature = {nullptr};
     DX12CommandQueue     *directCQ;
     DX12RenderMesh        renderSkull;
     ID3D12DescriptorHeap *srvDescriptorHeap;
@@ -74,15 +68,8 @@ struct DX12 {
     ID3D12PipelineState  *drawSSAOPSO;
     DXGI_FORMAT           mBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_FORMAT           mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    void                  CreateSSAORootSignature();
-    void                  CreateShadersAndPSOs();
     ID3D12Resource       *cbConstantUploadBuffer;
     BYTE                 *cbDataMapping = nullptr;
-    void                  UploadConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX viewProj);
-    void                  DrawRenderMesh(ID3D12GraphicsCommandList2 *commandList, DX12RenderMesh rm);
-    UINT                  mRtvDescriptorSize = 0;
-    UINT                  mDsvDescriptorSize = 0;
-    UINT                  mCbvSrvUavDescriptorSize = 0;
 };
 
 #endif //!_DX12_H_

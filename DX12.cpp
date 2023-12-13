@@ -210,194 +210,7 @@ void DX12::Initialize() {
 
     DX12_HR(cbConstantUploadBuffer->Map(0, nullptr, reinterpret_cast<void **>(&cbDataMapping)), L"");
 
-    mRtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    mDsvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-    mCbvSrvUavDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-    directCQ->ExecuteCommandList(commandList);
-    Flush();
-}
-
-void DX12::UpdateAndRender(DirectX::XMMATRIX modelMatrix, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix) {
-    // UPDATE:
-
-    auto                        commandQueue = directCQ;
-    ID3D12GraphicsCommandList2 *commandList = commandQueue->GetCommandList();
-
-    UploadConstantBuffer(modelMatrix, viewMatrix, projectionMatrix);
-    ssaoPass.UploadConstants(projectionMatrix);
-
-    // RENDER:
-    auto                          backBuffer = backBuffers[currentBackBufferIndex];
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), currentBackBufferIndex, rtvDescriptorSize);
-    auto                          dsv = dsvHeap->GetCPUDescriptorHandleForHeapStart();
-
-    ID3D12DescriptorHeap *descriptorHeaps[] = {srvDescriptorHeap};
-    commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-    commandList->SetGraphicsRootSignature(rootSignature);
-
-    // Draw Normals..
-    commandList->RSSetViewports(1, &viewPort);
-    commandList->RSSetScissorRects(1, &scissorRect);
-
-    auto normalMap = ssaoPass.GetNormalMap();
-    auto normalMapRtv = ssaoPass.GetNormalMapRTV();
-    TransitionResource(commandList, normalMap, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-    float clearValue[] = {0.0f, 0.0f, 1.0f, 0.0f};
-    commandList->ClearRenderTargetView(normalMapRtv, clearValue, 0, nullptr);
-    commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-    commandList->OMSetRenderTargets(1, &normalMapRtv, true, &dsv);
-    commandList->SetPipelineState(normalPSO);
-    DrawRenderMesh(commandList, renderSkull);
-
-    TransitionResource(commandList, normalMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ);
-
-    // .. draw SSAO.
-    commandList->SetGraphicsRootSignature(ssaoRootSignature);
-    ssaoPass.ComputeSsao(commandList);
-
-    commandList->SetGraphicsRootSignature(rootSignature);
-    commandList->RSSetViewports(1, &viewPort);
-    commandList->RSSetScissorRects(1, &scissorRect);
-
-    TransitionResource(commandList, backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-    float clearColor[] = {0.4f, 0.6f, 0.9f, 1.0f};
-    ClearRTV(commandList, rtv, clearColor);
-
-    commandList->OMSetRenderTargets(1, &rtv, true, &dsv);
-
-    commandList->SetGraphicsRootConstantBufferView(0, cbConstantUploadBuffer->GetGPUVirtualAddress());
-    CD3DX12_GPU_DESCRIPTOR_HANDLE ssaoDescriptor(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    ssaoDescriptor.Offset(0, mCbvSrvUavDescriptorSize);
-    commandList->SetGraphicsRootDescriptorTable(2, ssaoDescriptor);
-
-    // .. sample ssao onto a fullscreen effect.
-    commandList->SetPipelineState(drawSSAOPSO);
-    commandList->IASetVertexBuffers(0, 0, nullptr);
-    commandList->IASetIndexBuffer(nullptr);
-    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    commandList->DrawInstanced(6, 1, 0, 0);
-
-    TransitionResource(commandList, backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-
-    frameFenceValues[currentBackBufferIndex] = commandQueue->ExecuteCommandList(commandList);
-
-    DX12_HR(swapChain->Present(0, 0), L"Failed to swap back buffers.");
-    currentBackBufferIndex = swapChain->GetCurrentBackBufferIndex();
-    commandQueue->WaitForFenceValue(frameFenceValues[currentBackBufferIndex]);
-}
-
-void DX12::CleanUp() {
-
-    Flush();
-
-    delete directCQ;
-    directCQ = nullptr;
-
-    DX12_RELEASE(rootSignature);
-    DX12_RELEASE(dsvHeap);
-    DX12_RELEASE(depthBuffer);
-    DX12_RELEASE(indexBuffer);
-    DX12_RELEASE(vertexBuffer);
-    for (int i = 0; i < NUM_FRAMES; ++i) {
-        DX12_RELEASE(backBuffers[i]);
-    }
-
-    DX12_RELEASE(rtvDescriptorHeap);
-    DX12_RELEASE(swapChain);
-    DX12_RELEASE(device);
-}
-
-void DX12::TransitionResource(ID3D12GraphicsCommandList2 *commandList, ID3D12Resource *resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, before, after);
-    commandList->ResourceBarrier(1, &barrier);
-}
-
-void DX12::ClearRTV(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE rtv, FLOAT *clearColor) {
-    commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
-}
-
-void DX12::ClearDepth(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE dsv, float depth) {
-    commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, depth, 0, 0, nullptr);
-}
-
-ID3D12Resource *CreateDefaultBuffer(
-    ID3D12Device              *device,
-    ID3D12GraphicsCommandList *cmdList,
-    const void                *initData,
-    UINT64                     byteSize,
-    ID3D12Resource           **uploadBuffer) {
-
-    ID3D12Resource *defaultBuffer;
-
-    auto heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto initial_state = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-    DX12_HR(device->CreateCommittedResource(
-                &heap_prop,
-                D3D12_HEAP_FLAG_NONE,
-                &initial_state,
-                D3D12_RESOURCE_STATE_COMMON,
-                nullptr,
-                IID_PPV_ARGS(&defaultBuffer)),
-            L"");
-
-    heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    DX12_HR(device->CreateCommittedResource(
-                &heap_prop,
-                D3D12_HEAP_FLAG_NONE,
-                &initial_state,
-                D3D12_RESOURCE_STATE_GENERIC_READ,
-                nullptr,
-                IID_PPV_ARGS(uploadBuffer)),
-            L"");
-
-    D3D12_SUBRESOURCE_DATA subResourceData = {};
-    subResourceData.pData = initData;
-    subResourceData.RowPitch = byteSize;
-    subResourceData.SlicePitch = subResourceData.RowPitch;
-
-    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-    cmdList->ResourceBarrier(1, &barrier1);
-    UpdateSubresources<1>(cmdList, defaultBuffer, *uploadBuffer, 0, 0, 1, &subResourceData);
-    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ);
-    cmdList->ResourceBarrier(1, &barrier2);
-
-    return defaultBuffer;
-}
-
-void DX12::UpdateBufferResource(ID3D12GraphicsCommandList2 *commandList, ID3D12Resource **dest, ID3D12Resource **intermediare,
-                                size_t numElements, size_t elementSize, const void *bufferData, D3D12_RESOURCE_FLAGS flags) {
-    size_t bufferSize = numElements * elementSize;
-
-    auto heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto initial_state = CD3DX12_RESOURCE_DESC::Buffer(bufferSize, flags);
-    DX12_HR(device->CreateCommittedResource(&heap_prop, D3D12_HEAP_FLAG_NONE,
-                                            &initial_state, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(dest)),
-            L"Failed to commit dest resource.");
-
-    if (bufferData) {
-        auto heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        auto initial_state = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-        DX12_HR(device->CreateCommittedResource(&heap_prop, D3D12_HEAP_FLAG_NONE, &initial_state,
-                                                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(intermediare)),
-                L"Failed to commit intermediare resource.");
-
-        D3D12_SUBRESOURCE_DATA subresourceData = {};
-        subresourceData.pData = bufferData;
-        subresourceData.RowPitch = bufferSize;
-        subresourceData.SlicePitch = subresourceData.RowPitch;
-
-        UpdateSubresources(commandList, *dest, *intermediare, 0, 0, 1, &subresourceData);
-    }
-}
-
-void DX12::LoadContent() {
-
-    auto commandQueue = directCQ;
-    auto commandList = commandQueue->GetCommandList();
+    // .. load model ..
     {
         std::ifstream fin("models/skull.txt");
 
@@ -471,15 +284,12 @@ void DX12::LoadContent() {
         renderSkull.baseVertexLoc = 0;
     }
 
-    // .. initialize our ssao pass ..
-    ssaoPass.Initialize(device, commandList, windowWidth, windowHeight, viewPort, scissorRect);
-
-    CD3DX12_DESCRIPTOR_RANGE texTable0;
-    texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    CD3DX12_DESCRIPTOR_RANGE ssaoTex;
+    ssaoTex.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
     CD3DX12_ROOT_PARAMETER rootParameters[3];
     rootParameters[0].InitAsConstantBufferView(0);
     rootParameters[1].InitAsShaderResourceView(0, 1);
-    rootParameters[2].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[2].InitAsDescriptorTable(1, &ssaoTex, D3D12_SHADER_VISIBILITY_PIXEL);
 
     CD3DX12_STATIC_SAMPLER_DESC sampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
                                         D3D12_TEXTURE_ADDRESS_MODE_WRAP,
@@ -499,38 +309,315 @@ void DX12::LoadContent() {
     DX12_HR(device->CreateRootSignature(0, rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)), L"Failed to create root signature.");
 
     // SSAO root:
-    CreateSSAORootSignature();
+    CD3DX12_DESCRIPTOR_RANGE texTable0;
+    texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0);
+
+    CD3DX12_DESCRIPTOR_RANGE texTable1;
+    texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0);
+
+    CD3DX12_ROOT_PARAMETER ssaoRootParameters[3];
+    ssaoRootParameters[0].InitAsConstantBufferView(0);
+    ssaoRootParameters[1].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
+    ssaoRootParameters[2].InitAsDescriptorTable(1, &texTable1, D3D12_SHADER_VISIBILITY_PIXEL);
+
+    CD3DX12_STATIC_SAMPLER_DESC pointClampSampler = {};
+    pointClampSampler.ShaderRegister = 0;
+    pointClampSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    pointClampSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClampSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClampSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+
+    CD3DX12_STATIC_SAMPLER_DESC depthMapSampler = {};
+    depthMapSampler.ShaderRegister = 1;
+    depthMapSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    depthMapSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    depthMapSampler.MipLODBias = 0,
+    depthMapSampler.MaxAnisotropy = 0,
+    depthMapSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    depthMapSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    depthMapSampler.MinLOD = 0;
+    depthMapSampler.MaxLOD = D3D12_FLOAT32_MAX;
+    depthMapSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    CD3DX12_STATIC_SAMPLER_DESC linearWrapSampler = {};
+    linearWrapSampler.ShaderRegister = 2;
+    linearWrapSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    linearWrapSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    linearWrapSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    linearWrapSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+
+    std::array<CD3DX12_STATIC_SAMPLER_DESC, 3> staticSamplers =
+        {
+            pointClampSampler, depthMapSampler, linearWrapSampler};
+
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(_countof(ssaoRootParameters), ssaoRootParameters,
+                                            (UINT)staticSamplers.size(), staticSamplers.data(),
+                                            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ID3DBlob *serializedRootSig = nullptr;
+    errorBlob = nullptr;
+    DX12_HR(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                        &serializedRootSig, &errorBlob),
+            L"");
+    DX12_HR(device->CreateRootSignature(
+                0,
+                serializedRootSig->GetBufferPointer(),
+                serializedRootSig->GetBufferSize(),
+                IID_PPV_ARGS(&ssaoRootSignature)),
+            L"");
 
     D3D12_DESCRIPTOR_HEAP_DESC srvDesc = {};
     srvDesc.NumDescriptors = 4;
     srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     DX12_HR(device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&srvDescriptorHeap)), L"");
+    cbvSrvUavDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    // CPU
-    auto srvCPU = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-    srvCPU.Offset(0, mCbvSrvUavDescriptorSize);
+    // Vertex Shader:
+    ID3DBlob *ssaoVSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/SSAOVS.cso", &ssaoVSBlob), L"Failed to load vertex shader cso");
+    ID3DBlob *normalsVSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/NormalsVS.cso", &normalsVSBlob), L"Failed to load vertex shader cso");
+    ID3DBlob *drawSSAOVSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/DrawSSAOVS.cso", &drawSSAOVSBlob), L"Failed to load vertex shader cso.");
+    ID3DBlob *ssaoPSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/SSAOPS.cso", &ssaoPSBlob), L"Failed to load pixel shader cso.");
+    ID3DBlob *normalsPSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/NormalsPS.cso", &normalsPSBlob), L"Failed to load pixel shader cso.");
+    ID3DBlob *drawSSAOPSBlob;
+    DX12_HR(D3DReadFileToBlob(L"x64/Debug/DrawSSAOPS.cso", &drawSSAOPSBlob), L"Failed to load pixel shader cso.");
 
-    // GPU
-    auto srvGPU = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    srvGPU.Offset(0, mCbvSrvUavDescriptorSize);
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    };
 
-    // RTV
-    auto rtv = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-    rtv.Offset(NUM_FRAMES, mRtvDescriptorSize);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC sharedPSODesc;
 
-    ssaoPass.BuildDescriptors(depthBuffer, srvCPU, srvGPU, rtv, mCbvSrvUavDescriptorSize, mRtvDescriptorSize);
+    ZeroMemory(&sharedPSODesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
+    sharedPSODesc.InputLayout = {inputLayout, (UINT)_countof(inputLayout)};
+    sharedPSODesc.pRootSignature = rootSignature;
+    sharedPSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    sharedPSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    sharedPSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    sharedPSODesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    sharedPSODesc.SampleMask = UINT_MAX;
+    sharedPSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    sharedPSODesc.NumRenderTargets = 1;
+    sharedPSODesc.RTVFormats[0] = mBackBufferFormat;
+    sharedPSODesc.DSVFormat = mDepthStencilFormat;
 
-    CreateShadersAndPSOs();
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC drawSSAOPSODesc = sharedPSODesc;
+    drawSSAOPSODesc.pRootSignature = rootSignature;
+    drawSSAOPSODesc.VS = CD3DX12_SHADER_BYTECODE(drawSSAOVSBlob);
+    drawSSAOPSODesc.PS = CD3DX12_SHADER_BYTECODE(drawSSAOPSBlob);
+    drawSSAOPSODesc.SampleDesc.Count = 1;
+    drawSSAOPSODesc.SampleDesc.Quality = 0;
+    DX12_HR(device->CreateGraphicsPipelineState(&drawSSAOPSODesc, IID_PPV_ARGS(&drawSSAOPSO)), L"");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC normalsPSODesc = sharedPSODesc;
+    normalsPSODesc.VS = CD3DX12_SHADER_BYTECODE(normalsVSBlob);
+    normalsPSODesc.PS = CD3DX12_SHADER_BYTECODE(normalsPSBlob);
+    normalsPSODesc.RTVFormats[0] = DX12SSAOPass::normalMapFormat;
+    normalsPSODesc.SampleDesc.Count = 1;
+    normalsPSODesc.SampleDesc.Quality = 0;
+    normalsPSODesc.DSVFormat = mDepthStencilFormat;
+    DX12_HR(device->CreateGraphicsPipelineState(&normalsPSODesc, IID_PPV_ARGS(&normalPSO)), L"");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC ssaoPSODesc = sharedPSODesc;
+    ssaoPSODesc.InputLayout = {nullptr, 0};
+    ssaoPSODesc.pRootSignature = ssaoRootSignature;
+    ssaoPSODesc.VS = CD3DX12_SHADER_BYTECODE(ssaoVSBlob);
+    ssaoPSODesc.PS = CD3DX12_SHADER_BYTECODE(ssaoPSBlob);
+    ssaoPSODesc.DepthStencilState.DepthEnable = false;
+    ssaoPSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    ssaoPSODesc.RTVFormats[0] = DX12SSAOPass::ambientMapFormat;
+    ssaoPSODesc.SampleDesc.Count = 1;
+    ssaoPSODesc.SampleDesc.Quality = 0;
+    ssaoPSODesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    DX12_HR(device->CreateGraphicsPipelineState(&ssaoPSODesc, IID_PPV_ARGS(&ssaoPSO)), L"");
+
+    auto srvCPUDescHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    auto srvGPUDescHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    auto rtvCPUDescHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    rtvCPUDescHandle.Offset(NUM_FRAMES, rtvDescriptorSize);
+
+    // .. initialize our ssao pass ..
+    ssaoPass.Initialize(device, commandList, windowWidth, windowHeight, viewPort, scissorRect);
+    ssaoPass.BuildDescriptors(depthBuffer, srvCPUDescHandle, srvGPUDescHandle, rtvCPUDescHandle, cbvSrvUavDescriptorSize, rtvDescriptorSize);
     ssaoPass.SetPSOs(ssaoPSO);
 
-    uint64_t fenceValue = commandQueue->ExecuteCommandList(commandList);
-    commandQueue->WaitForFenceValue(fenceValue);
+    uint64_t fenceValue = directCQ->ExecuteCommandList(commandList);
+    directCQ->WaitForFenceValue(fenceValue);
 
     Flush();
 
+    DX12_RELEASE(ssaoVSBlob);
+    DX12_RELEASE(drawSSAOVSBlob);
+    DX12_RELEASE(normalsVSBlob);
+    DX12_RELEASE(ssaoPSBlob);
+    DX12_RELEASE(drawSSAOPSBlob);
+    DX12_RELEASE(normalsPSBlob);
     DX12_RELEASE(rootSignatureBlob);
     DX12_RELEASE(errorBlob);
+}
+
+void DX12::UpdateAndRender(DirectX::XMMATRIX modelMatrix, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix) {
+    // UPDATE:
+
+    auto                        commandQueue = directCQ;
+    ID3D12GraphicsCommandList2 *commandList = commandQueue->GetCommandList();
+
+    UploadConstantBuffer(modelMatrix, viewMatrix, projectionMatrix);
+    ssaoPass.UploadConstants(projectionMatrix);
+
+    // RENDER:
+    auto                          backBuffer = backBuffers[currentBackBufferIndex];
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), currentBackBufferIndex, rtvDescriptorSize);
+    auto                          dsv = dsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    ID3D12DescriptorHeap *descriptorHeaps[] = {srvDescriptorHeap};
+    commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+    commandList->SetGraphicsRootSignature(rootSignature);
+
+    // Draw Normals..
+    commandList->RSSetViewports(1, &viewPort);
+    commandList->RSSetScissorRects(1, &scissorRect);
+
+    auto normalMap = ssaoPass.GetNormalMap();
+    auto normalMapRtv = ssaoPass.GetNormalMapRTV();
+    TransitionResource(commandList, normalMap, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    float clearValue[] = {0.0f, 0.0f, 1.0f, 0.0f};
+    commandList->ClearRenderTargetView(normalMapRtv, clearValue, 0, nullptr);
+    commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+    commandList->OMSetRenderTargets(1, &normalMapRtv, true, &dsv);
+    commandList->SetPipelineState(normalPSO);
+    DrawRenderMesh(commandList, renderSkull);
+
+    TransitionResource(commandList, normalMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    // .. draw SSAO.
+    commandList->SetGraphicsRootSignature(ssaoRootSignature);
+    ssaoPass.ComputeSsao(commandList);
+
+    commandList->SetGraphicsRootSignature(rootSignature);
+    commandList->RSSetViewports(1, &viewPort);
+    commandList->RSSetScissorRects(1, &scissorRect);
+
+    TransitionResource(commandList, backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    float clearColor[] = {0.4f, 0.6f, 0.9f, 1.0f};
+    ClearRTV(commandList, rtv, clearColor);
+
+    commandList->OMSetRenderTargets(1, &rtv, true, &dsv);
+
+    commandList->SetGraphicsRootConstantBufferView(0, cbConstantUploadBuffer->GetGPUVirtualAddress());
+    CD3DX12_GPU_DESCRIPTOR_HANDLE ssaoDescriptor(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    ssaoDescriptor.Offset(0, cbvSrvUavDescriptorSize);
+    commandList->SetGraphicsRootDescriptorTable(2, ssaoDescriptor);
+
+    // .. sample ssao onto a fullscreen effect.
+    commandList->SetPipelineState(drawSSAOPSO);
+    commandList->IASetVertexBuffers(0, 0, nullptr);
+    commandList->IASetIndexBuffer(nullptr);
+    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    commandList->DrawInstanced(6, 1, 0, 0);
+
+    TransitionResource(commandList, backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+
+    frameFenceValues[currentBackBufferIndex] = commandQueue->ExecuteCommandList(commandList);
+
+    DX12_HR(swapChain->Present(0, 0), L"Failed to swap back buffers.");
+    currentBackBufferIndex = swapChain->GetCurrentBackBufferIndex();
+    commandQueue->WaitForFenceValue(frameFenceValues[currentBackBufferIndex]);
+}
+
+void DX12::CleanUp() {
+
+    Flush();
+
+    delete directCQ;
+    directCQ = nullptr;
+
+    DX12_RELEASE(rootSignature);
+    DX12_RELEASE(dsvHeap);
+    DX12_RELEASE(depthBuffer);
+    for (int i = 0; i < NUM_FRAMES; ++i) {
+        DX12_RELEASE(backBuffers[i]);
+    }
+
+    DX12_RELEASE(rtvDescriptorHeap);
+    DX12_RELEASE(swapChain);
+    DX12_RELEASE(device);
+}
+
+void DX12::TransitionResource(ID3D12GraphicsCommandList2 *commandList, ID3D12Resource *resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, before, after);
+    commandList->ResourceBarrier(1, &barrier);
+}
+
+void DX12::ClearRTV(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE rtv, FLOAT *clearColor) {
+    commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
+}
+
+void DX12::ClearDepth(ID3D12GraphicsCommandList2 *commandList, D3D12_CPU_DESCRIPTOR_HANDLE dsv, float depth) {
+    commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, depth, 0, 0, nullptr);
+}
+
+ID3D12Resource *DX12::CreateDefaultBuffer(
+    ID3D12Device              *device,
+    ID3D12GraphicsCommandList *cmdList,
+    const void                *initData,
+    UINT64                     byteSize,
+    ID3D12Resource           **uploadBuffer) {
+
+    ID3D12Resource *defaultBuffer;
+
+    auto heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    auto initial_state = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+    DX12_HR(device->CreateCommittedResource(
+                &heap_prop,
+                D3D12_HEAP_FLAG_NONE,
+                &initial_state,
+                D3D12_RESOURCE_STATE_COMMON,
+                nullptr,
+                IID_PPV_ARGS(&defaultBuffer)),
+            L"");
+
+    heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    DX12_HR(device->CreateCommittedResource(
+                &heap_prop,
+                D3D12_HEAP_FLAG_NONE,
+                &initial_state,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(uploadBuffer)),
+            L"");
+
+    D3D12_SUBRESOURCE_DATA subResourceData = {};
+    subResourceData.pData = initData;
+    subResourceData.RowPitch = byteSize;
+    subResourceData.SlicePitch = subResourceData.RowPitch;
+
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList->ResourceBarrier(1, &barrier1);
+    UpdateSubresources<1>(cmdList, defaultBuffer, *uploadBuffer, 0, 0, 1, &subResourceData);
+    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ);
+    cmdList->ResourceBarrier(1, &barrier2);
+
+    return defaultBuffer;
+}
+
+void DX12::LoadContent() {
+    // .. fetch our commandqueue ..
+    auto commandQueue = directCQ;
+    auto commandList = commandQueue->GetCommandList();
 }
 
 void DX12::UploadConstantBuffer(DirectX::XMMATRIX world, DirectX::XMMATRIX view, DirectX::XMMATRIX proj) {
@@ -558,168 +645,5 @@ void DX12::Flush() {
     directCQ->Flush();
 }
 
-void DX12::CreateSSAORootSignature() {
-    CD3DX12_DESCRIPTOR_RANGE texTable0;
-    texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0);
-
-    CD3DX12_DESCRIPTOR_RANGE texTable1;
-    texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0);
-
-    // Root parameter can be a table, root descriptor or root constants.
-    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
-
-    // Perfomance TIP: Order from most frequent to least frequent.
-    slotRootParameter[0].InitAsConstantBufferView(0);
-    slotRootParameter[1].InitAsConstants(1, 1);
-    slotRootParameter[2].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
-    slotRootParameter[3].InitAsDescriptorTable(1, &texTable1, D3D12_SHADER_VISIBILITY_PIXEL);
-
-    const CD3DX12_STATIC_SAMPLER_DESC pointClamp(
-        0,                                 // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_POINT,    // filter
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
-
-    CD3DX12_STATIC_SAMPLER_DESC       depthMapSampler = {};
-    depthMapSampler.ShaderRegister = 1;
-    depthMapSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    depthMapSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    depthMapSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    depthMapSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    depthMapSampler.MipLODBias = 0,
-    depthMapSampler.MaxAnisotropy = 0,
-    depthMapSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-    depthMapSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-    depthMapSampler.MinLOD = 0;
-    depthMapSampler.MaxLOD = D3D12_FLOAT32_MAX;
-    depthMapSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    const CD3DX12_STATIC_SAMPLER_DESC depthMapSam(
-        1,                                 // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,   // filter
-        D3D12_TEXTURE_ADDRESS_MODE_BORDER, // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_BORDER, // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_BORDER, // addressW
-        0.0f,
-        0,
-        D3D12_COMPARISON_FUNC_LESS_EQUAL,
-        D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE);
-
-    const CD3DX12_STATIC_SAMPLER_DESC linearWrap(
-        2,                                // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,  // filter
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
-
-    std::array<CD3DX12_STATIC_SAMPLER_DESC, 3> staticSamplers =
-        {
-            pointClamp, depthMapSam, linearWrap};
-
-    // A root signature is an array of root parameters.
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(_countof(slotRootParameter), slotRootParameter,
-                                            (UINT)staticSamplers.size(), staticSamplers.data(),
-                                            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-    // create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
-    ID3DBlob *serializedRootSig = nullptr;
-    ID3DBlob *errorBlob = nullptr;
-    DX12_HR(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-                                        &serializedRootSig, &errorBlob),
-            L"");
-    DX12_HR(device->CreateRootSignature(
-                0,
-                serializedRootSig->GetBufferPointer(),
-                serializedRootSig->GetBufferSize(),
-                IID_PPV_ARGS(&ssaoRootSignature)),
-            L"");
-}
-
 void DX12::CreateShadersAndPSOs() {
-
-    // Vertex Shader:
-    ID3DBlob *ssaoVSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/SSAOVS.cso", &ssaoVSBlob), L"Failed to load vertex shader cso");
-    ID3DBlob *normalsVSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/NormalsVS.cso", &normalsVSBlob), L"Failed to load vertex shader cso");
-    ID3DBlob *drawSSAOVSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/DrawSSAOVS.cso", &drawSSAOVSBlob), L"Failed to load vertex shader cso.");
-    ID3DBlob *ssaoPSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/SSAOPS.cso", &ssaoPSBlob), L"Failed to load pixel shader cso.");
-    ID3DBlob *normalsPSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/NormalsPS.cso", &normalsPSBlob), L"Failed to load pixel shader cso.");
-    ID3DBlob *drawSSAOPSBlob;
-    DX12_HR(D3DReadFileToBlob(L"x64/Debug/DrawSSAOPS.cso", &drawSSAOPSBlob), L"Failed to load pixel shader cso.");
-
-    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC basePsoDesc;
-
-    ZeroMemory(&basePsoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
-    basePsoDesc.InputLayout = {inputLayout, (UINT)_countof(inputLayout)};
-    basePsoDesc.pRootSignature = rootSignature;
-    basePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    basePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    basePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    basePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    basePsoDesc.SampleMask = UINT_MAX;
-    basePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    basePsoDesc.NumRenderTargets = 1;
-    basePsoDesc.RTVFormats[0] = mBackBufferFormat;
-    basePsoDesc.DSVFormat = mDepthStencilFormat;
-
-    //
-    // PSO for debug layer.
-    //
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC debugPsoDesc = basePsoDesc;
-    debugPsoDesc.pRootSignature = rootSignature;
-    debugPsoDesc.VS = CD3DX12_SHADER_BYTECODE(drawSSAOVSBlob);
-    debugPsoDesc.PS = CD3DX12_SHADER_BYTECODE(drawSSAOPSBlob);
-    debugPsoDesc.SampleDesc.Count = 1;
-    debugPsoDesc.SampleDesc.Quality = 0;
-    DX12_HR(device->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&drawSSAOPSO)), L"");
-
-    //
-    // PSO for drawing normals.
-    //
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC drawNormalsPsoDesc = basePsoDesc;
-    drawNormalsPsoDesc.VS = CD3DX12_SHADER_BYTECODE(normalsVSBlob);
-    drawNormalsPsoDesc.PS = CD3DX12_SHADER_BYTECODE(normalsPSBlob);
-    drawNormalsPsoDesc.RTVFormats[0] = DX12SSAOPass::normalMapFormat;
-    drawNormalsPsoDesc.SampleDesc.Count = 1;
-    drawNormalsPsoDesc.SampleDesc.Quality = 0;
-    drawNormalsPsoDesc.DSVFormat = mDepthStencilFormat;
-    DX12_HR(device->CreateGraphicsPipelineState(&drawNormalsPsoDesc, IID_PPV_ARGS(&normalPSO)), L"");
-
-    //
-    // PSO for SSAO.
-    //
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC ssaoPsoDesc = basePsoDesc;
-    ssaoPsoDesc.InputLayout = {nullptr, 0};
-    ssaoPsoDesc.pRootSignature = ssaoRootSignature;
-    ssaoPsoDesc.VS = CD3DX12_SHADER_BYTECODE(ssaoVSBlob);
-    ssaoPsoDesc.PS = CD3DX12_SHADER_BYTECODE(ssaoPSBlob);
-
-    // SSAO effect does not need the depth buffer.
-    ssaoPsoDesc.DepthStencilState.DepthEnable = false;
-    ssaoPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    ssaoPsoDesc.RTVFormats[0] = DX12SSAOPass::ambientMapFormat;
-    ssaoPsoDesc.SampleDesc.Count = 1;
-    ssaoPsoDesc.SampleDesc.Quality = 0;
-    ssaoPsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
-    DX12_HR(device->CreateGraphicsPipelineState(&ssaoPsoDesc, IID_PPV_ARGS(&ssaoPSO)), L"");
-
-    DX12_RELEASE(ssaoVSBlob);
-    DX12_RELEASE(drawSSAOVSBlob);
-    DX12_RELEASE(normalsVSBlob);
-
-    DX12_RELEASE(ssaoPSBlob);
-    DX12_RELEASE(drawSSAOPSBlob);
-    DX12_RELEASE(normalsPSBlob);
 }

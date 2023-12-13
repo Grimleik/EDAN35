@@ -19,7 +19,6 @@ struct SsaoConstants {
     float SurfaceEpsilon = 0.05f;
 };
 
-
 struct DX12SSAOPass {
     DX12SSAOPass();
     ~DX12SSAOPass();
@@ -32,10 +31,7 @@ struct DX12SSAOPass {
 
     void                          GetOffsetVectors(DirectX::XMFLOAT4 offsets[14]);
     ID3D12Resource               *GetNormalMap();
-    ID3D12Resource               *GetAmbientMap();
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetNormalMapRTV() const;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetNormalMapSRV() const;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetAmbientMapSRV() const;
     void                          BuildDescriptors(ID3D12Resource *depthStencilBuffer, CD3DX12_CPU_DESCRIPTOR_HANDLE hCpuSrv,
                                                    CD3DX12_GPU_DESCRIPTOR_HANDLE hGpuSrv,
                                                    CD3DX12_CPU_DESCRIPTOR_HANDLE hCpuRtv,

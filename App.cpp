@@ -15,7 +15,7 @@ App::~App() {
 
 void App::Init() {
     dx12.Initialize();
-    dx12.LoadContent();
+    //dx12.LoadContent();
 }
 
 bool App::Update(double dt, double totalTime) {

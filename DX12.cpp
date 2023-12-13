@@ -375,6 +375,7 @@ void DX12::Initialize() {
     DX12_HR(device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&srvDescriptorHeap)), L"");
     cbvSrvUavDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+#if 0
     // Vertex Shader:
     ID3DBlob *ssaoVSBlob;
     DX12_HR(D3DReadFileToBlob(L"x64/Debug/SSAOVS.cso", &ssaoVSBlob), L"Failed to load vertex shader cso");
@@ -388,6 +389,49 @@ void DX12::Initialize() {
     DX12_HR(D3DReadFileToBlob(L"x64/Debug/NormalsPS.cso", &normalsPSBlob), L"Failed to load pixel shader cso.");
     ID3DBlob *drawSSAOPSBlob;
     DX12_HR(D3DReadFileToBlob(L"x64/Debug/DrawSSAOPS.cso", &drawSSAOPSBlob), L"Failed to load pixel shader cso.");
+#else
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(DEBUG) || defined(_DEBUG)
+    flags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ID3DBlob *ssaoVSBlob;
+    ID3DBlob *ssaoPSBlob;
+    ID3DBlob *normalsVSBlob;
+    ID3DBlob *normalsPSBlob;
+    ID3DBlob *drawSSAOVSBlob;
+    ID3DBlob *drawSSAOPSBlob;
+    DX12_HR(D3DCompileFromFile(L"shaders/SSAOVS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "vs_5_1", flags, 0, &ssaoVSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+    DX12_HR(D3DCompileFromFile(L"shaders/SSAOPS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "ps_5_1", flags, 0, &ssaoPSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+    DX12_HR(D3DCompileFromFile(L"shaders/NormalsVS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "vs_5_1", flags, 0, &normalsVSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+    DX12_HR(D3DCompileFromFile(L"shaders/NormalsPS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "ps_5_1", flags, 0, &normalsPSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+    DX12_HR(D3DCompileFromFile(L"shaders/DrawSSAOVS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "vs_5_1", flags, 0, &drawSSAOVSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+    DX12_HR(D3DCompileFromFile(L"shaders/DrawSSAOPS.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                               "main", "ps_5_1", flags, 0, &drawSSAOPSBlob, &errorBlob),
+            L"");
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char *)errorBlob->GetBufferPointer());
+#endif
 
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},

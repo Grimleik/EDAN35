@@ -73,4 +73,7 @@
     <FxCompile Include="shaders\DrawSSAOPS.hlsl" />
     <FxCompile Include="shaders\DrawSSAOVS.hlsl" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\Users\skuli\Downloads\d3dcompiler_47\d3dcompiler_47.dll" />
+  </ItemGroup>
 </Project>
